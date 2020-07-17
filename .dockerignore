@@ -1,0 +1,9 @@
+# This file works on a "ban everything" approach
+
+# Don't allow anything
+**
+
+# .. apart from these things
+!go.mod
+!go.sum
+!**/*.go
