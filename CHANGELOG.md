@@ -1,6 +1,12 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+## Fixed
+
+* VCS_REF and BUILD_DATE now being consumed properly by `docker build` 
+
 ## v0.3.0+mintel.0.2.0 (2020-07-24)
 
 ### Added

@@ -28,6 +28,15 @@ var (
 	ctx    = context.Background()
 )
 
+var (
+	googlePublicBuckets = [3]string{
+		"my-fake-bucket",
+		//"gcp-public-data-landsat",
+		"gcp-public-data-nexrad-l2",
+		"gcp-public-data-sentinel-2",
+	}
+)
+
 func handleError(w http.ResponseWriter, err error) {
 	if err != nil {
 		if err == storage.ErrObjectNotExist {
@@ -164,6 +173,38 @@ func proxy(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// livenessProbeHandler tests whether the http server has hung by attempting to return a simple request
+func livenessProbeHandler(w http.ResponseWriter, r *http.Request) {
+	return
+}
+
+// readinessProbeHandler attempts to get the metadata from one of three public Google buckets (see
+// https://cloud.google.com/storage/docs/public-datasets) to test the connection to the API is operational. If all three
+// return an error then /readiness responds with a 503
+func readinessProbeHandler(w http.ResponseWriter, r *http.Request) {
+	var err error
+	for _, publicBucket := range googlePublicBuckets {
+		_, err = client.Bucket(publicBucket).Attrs(ctx)
+		if err == nil {
+			if *verbose {
+				log.Printf("[service] received metadata for public bucket %s",
+					publicBucket,
+				)
+			}
+			return
+		}
+		if *verbose {
+			log.Printf("[service] error receiving metadata for public bucket %s: %s",
+				publicBucket,
+				err,
+			)
+		}
+	}
+	if err != nil {
+		http.Error(w, "Service unavailable", http.StatusServiceUnavailable)
+	}
+}
+
 func main() {
 	flag.Parse()
 
@@ -179,6 +220,8 @@ func main() {
 
 	r := mux.NewRouter()
 	r.HandleFunc("/{bucket:[0-9a-zA-Z-_.]+}/{object:.*}", wrapper(proxy)).Methods("GET", "HEAD", "PUT", "POST", "DELETE")
+	r.HandleFunc("/healthz", wrapper(livenessProbeHandler)).Methods("GET")
+	r.HandleFunc("/readiness", wrapper(readinessProbeHandler)).Methods("GET")
 
 	log.Printf("[service] listening on %s", *bind)
 	if err := http.ListenAndServe(*bind, r); err != nil {

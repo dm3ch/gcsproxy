@@ -13,6 +13,9 @@ RUN CGO_ENABLED=0 GOOS=linux go build . && \
 
 FROM gcr.io/distroless/base-debian10 AS release
 
+ARG BUILD_DATE
+ARG VCS_REF
+
 LABEL org.opencontainers.image.title="gcsproxy" \
       org.opencontainers.image.description="Reverse proxy for Google Cloud Storage." \
       org.opencontainers.image.created=$BUILD_DATE \
