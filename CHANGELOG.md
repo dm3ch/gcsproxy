@@ -3,9 +3,16 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Added
+
+* Added liveness/readiness probes for Kubernetes
+* Added environment variable support
+* Added tests
+* Added pre-commit config
+
 ## Fixed
 
-* VCS_REF and BUILD_DATE now being consumed properly by `docker build` 
+* VCS_REF and BUILD_DATE now being consumed properly by `docker build`
 
 ## v0.3.0+mintel.0.2.0 (2020-07-24)
 
