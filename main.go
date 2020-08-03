@@ -22,7 +22,7 @@ var (
 	bind             = kingpin.Flag("bind-address", "Bind address").Short('b').Envar("GCSPROXY_BIND_ADDRESS").Default("127.0.0.1:8080").String()
 	verbose          = kingpin.Flag("verbose", "Show access log").Short('v').Envar("GCSPROXY_VERBOSE").Default("true").Bool()
 	credentials      = kingpin.Flag("credentials", "The path to the keyfile. If not present, client will use your default application credentials.").Short('c').Envar("GCSPROXY_CREDENTIALS").String()
-	readinessBuckets = kingpin.Flag("readiness-buckets", "Comma-separated list of bucket names to ping for readiness checks").Short('r').Envar("GCSPROXY_READINESS_BUCKETS").String()
+	readinessBuckets = kingpin.Flag("readiness-buckets", "Comma-separated list of bucket names to ping for readiness checks").Short('r').Envar("GCSPROXY_READINESS_BUCKETS").Default("gcp-public-data-landsat,gcp-public-data-nexrad-l2,gcp-public-data-sentinel-2").String()
 )
 
 var (
@@ -165,36 +165,31 @@ func livenessProbeHandler(w http.ResponseWriter, r *http.Request) {
 	return
 }
 
-// readinessProbeHandler attempts to get the metadata from one of three public Google buckets (see
-// https://cloud.google.com/storage/docs/public-datasets) to test the connection to the API is operational. If all three
-// return an error then /readiness responds with a 503
+// readinessProbeHandler attempts to get the metadata from each of a list of Google buckets provided as an argument via
+// --readiness-buckets. If it fails to retrieve metadata from ALL buckets provided the handler will return a 503
+// response. The default list of buckets provided contains the three public Google buckets (see
+// https://cloud.google.com/storage/docs/public-datasets).
 func readinessProbeHandler(w http.ResponseWriter, r *http.Request) {
 	var err error
-	var bucketList = strings.Split(*readinessBuckets, ",")
-	for _, bucket := range bucketList {
+	for _, bucket := range strings.Split(*readinessBuckets, ",") {
 		_, err = client.Bucket(bucket).Attrs(ctx)
 		if err == nil {
 			if *verbose {
-				log.Printf("[service] received metadata for public bucket %s",
+				log.Printf("received metadata for public bucket %s",
 					bucket,
 				)
 			}
 			return
 		}
-		log.Printf("[service] error receiving metadata for public bucket %s: %s",
+		log.Printf("error receiving metadata for bucket %s: %s",
 			bucket,
 			err,
 		)
 	}
-	if err != nil {
-		http.Error(w, "Service unavailable", http.StatusServiceUnavailable)
-	}
+	w.WriteHeader(http.StatusServiceUnavailable)
 }
 
-func main() {
-
-	kingpin.Parse()
-
+func initClient() {
 	var err error
 	if *credentials != "" {
 		client, err = storage.NewClient(ctx, option.WithCredentialsFile(*credentials))
@@ -204,6 +199,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to create client: %v", err)
 	}
+}
+
+func main() {
+
+	kingpin.Parse()
+
+	initClient()
 
 	r := mux.NewRouter()
 	r.HandleFunc("/{bucket:[0-9a-zA-Z-_.]+}/{object:.*}", wrapper(proxy)).Methods("GET", "HEAD", "PUT", "POST", "DELETE")
