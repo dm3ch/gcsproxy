@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"io"
 	"io/ioutil"
 	"log"
@@ -15,12 +14,13 @@ import (
 	"cloud.google.com/go/storage"
 	"github.com/gorilla/mux"
 	"google.golang.org/api/option"
+	"gopkg.in/alecthomas/kingpin.v2"
 )
 
 var (
-	bind        = flag.String("b", "127.0.0.1:8080", "Bind address")
-	verbose     = flag.Bool("v", false, "Show access log")
-	credentials = flag.String("c", "", "The path to the keyfile. If not present, client will use your default application credentials.")
+	bind        = kingpin.Flag("bind-address", "Bind address").Short('b').Envar("GCSPROXY_BIND_ADDRESS").Default("127.0.0.1:8080").String()
+	verbose     = kingpin.Flag("verbose", "Show access log").Short('v').Envar("GCSPROXY_VERBOSE").Default("true").Bool()
+	credentials = kingpin.Flag("credentials", "The path to the keyfile. If not present, client will use your default application credentials.").Short('c').Envar("GCSPROXY_CREDENTIALS").String()
 )
 
 var (
@@ -30,8 +30,7 @@ var (
 
 var (
 	googlePublicBuckets = [3]string{
-		"my-fake-bucket",
-		//"gcp-public-data-landsat",
+		"gcp-public-data-landsat",
 		"gcp-public-data-nexrad-l2",
 		"gcp-public-data-sentinel-2",
 	}
@@ -67,12 +66,6 @@ func setStrHeader(w http.ResponseWriter, key string, value string) {
 func setIntHeader(w http.ResponseWriter, key string, value int64) {
 	if value > 0 {
 		w.Header().Add(key, strconv.FormatInt(value, 10))
-	}
-}
-
-func setTimeHeader(w http.ResponseWriter, key string, value time.Time) {
-	if !value.IsZero() {
-		w.Header().Add(key, value.UTC().Format(http.TimeFormat))
 	}
 }
 
@@ -206,7 +199,8 @@ func readinessProbeHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	flag.Parse()
+
+	kingpin.Parse()
 
 	var err error
 	if *credentials != "" {
