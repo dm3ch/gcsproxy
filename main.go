@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"cloud.google.com/go/storage"
@@ -18,22 +19,15 @@ import (
 )
 
 var (
-	bind        = kingpin.Flag("bind-address", "Bind address").Short('b').Envar("GCSPROXY_BIND_ADDRESS").Default("127.0.0.1:8080").String()
-	verbose     = kingpin.Flag("verbose", "Show access log").Short('v').Envar("GCSPROXY_VERBOSE").Default("true").Bool()
-	credentials = kingpin.Flag("credentials", "The path to the keyfile. If not present, client will use your default application credentials.").Short('c').Envar("GCSPROXY_CREDENTIALS").String()
+	bind             = kingpin.Flag("bind-address", "Bind address").Short('b').Envar("GCSPROXY_BIND_ADDRESS").Default("127.0.0.1:8080").String()
+	verbose          = kingpin.Flag("verbose", "Show access log").Short('v').Envar("GCSPROXY_VERBOSE").Default("true").Bool()
+	credentials      = kingpin.Flag("credentials", "The path to the keyfile. If not present, client will use your default application credentials.").Short('c').Envar("GCSPROXY_CREDENTIALS").String()
+	readinessBuckets = kingpin.Flag("readiness-buckets", "Comma-separated list of bucket names to ping for readiness checks").Short('r').Envar("GCSPROXY_READINESS_BUCKETS").String()
 )
 
 var (
 	client *storage.Client
 	ctx    = context.Background()
-)
-
-var (
-	googlePublicBuckets = [3]string{
-		"gcp-public-data-landsat",
-		"gcp-public-data-nexrad-l2",
-		"gcp-public-data-sentinel-2",
-	}
 )
 
 func handleError(w http.ResponseWriter, err error) {
@@ -176,22 +170,21 @@ func livenessProbeHandler(w http.ResponseWriter, r *http.Request) {
 // return an error then /readiness responds with a 503
 func readinessProbeHandler(w http.ResponseWriter, r *http.Request) {
 	var err error
-	for _, publicBucket := range googlePublicBuckets {
-		_, err = client.Bucket(publicBucket).Attrs(ctx)
+	var bucketList = strings.Split(*readinessBuckets, ",")
+	for _, bucket := range bucketList {
+		_, err = client.Bucket(bucket).Attrs(ctx)
 		if err == nil {
 			if *verbose {
 				log.Printf("[service] received metadata for public bucket %s",
-					publicBucket,
+					bucket,
 				)
 			}
 			return
 		}
-		if *verbose {
-			log.Printf("[service] error receiving metadata for public bucket %s: %s",
-				publicBucket,
-				err,
-			)
-		}
+		log.Printf("[service] error receiving metadata for public bucket %s: %s",
+			bucket,
+			err,
+		)
 	}
 	if err != nil {
 		http.Error(w, "Service unavailable", http.StatusServiceUnavailable)

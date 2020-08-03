@@ -4,24 +4,19 @@ go 1.12
 
 require (
 	cloud.google.com/go v0.34.0
-	github.com/golang/mock v1.2.0 // indirect
-	github.com/golang/protobuf v1.2.0
-	github.com/googleapis/gax-go v2.0.0+incompatible
+	github.com/google/martian v2.1.0+incompatible // indirect
+	github.com/googleapis/gax-go v2.0.0+incompatible // indirect
 	github.com/gorilla/mux v1.6.2
-	github.com/hashicorp/golang-lru v0.5.1
-	go.opencensus.io v0.19.2
-	golang.org/x/exp v0.0.0-20190221220918-438050ddec5e // indirect
-	golang.org/x/lint v0.0.0-20190313153728-d0100b6bd8b3 // indirect
-	golang.org/x/net v0.0.0-20190328230028-74de082e2cca
-	golang.org/x/oauth2 v0.0.0-20190319182350-c85d3e98c914
-	golang.org/x/sys v0.0.0-20190329044733-9eb1bfa1ce65
-	golang.org/x/text v0.3.1-0.20180807135948-17ff2d5776d2
+	github.com/hashicorp/golang-lru v0.5.1 // indirect
+	github.com/kr/pretty v0.1.0 // indirect
+	github.com/stretchr/testify v1.4.0 // indirect
+	golang.org/x/net v0.0.0-20190620200207-3b0461eec859 // indirect
+	golang.org/x/oauth2 v0.0.0-20190319182350-c85d3e98c914 // indirect
+	golang.org/x/sync v0.0.0-20190423024810-112230192c58 // indirect
+	golang.org/x/sys v0.0.0-20190412213103-97732733099d // indirect
+	golang.org/x/text v0.3.1-0.20180807135948-17ff2d5776d2 // indirect
 	google.golang.org/api v0.3.0
-	google.golang.org/appengine v1.5.0
-	google.golang.org/genproto v0.0.0-20190327125643-d831d65fe17d
-	google.golang.org/grpc v1.19.0
+	google.golang.org/appengine v1.5.0 // indirect
+	google.golang.org/genproto v0.0.0-20190327125643-d831d65fe17d // indirect
 	gopkg.in/alecthomas/kingpin.v2 v2.2.6
-	gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127 // indirect
-	gopkg.in/yaml.v2 v2.2.2 // indirect
-	honnef.co/go/tools v0.0.0-20190106161140-3f1c8253044a // indirect
 )
