@@ -25,8 +25,8 @@ func TestLivenessProbeHandler(t *testing.T) {
 func TestReadinessProbeHandler(t *testing.T) {
 
 	var tests = []struct {
-		Name string
-		value string
+		Name     string
+		value    string
 		expected int
 	}{
 		{"good", "gcp-public-data-landsat,gcp-public-data-nexrad-l2,gcp-public-data-sentinel-2", http.StatusOK},
