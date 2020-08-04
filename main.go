@@ -175,7 +175,7 @@ func readinessProbeHandler(w http.ResponseWriter, r *http.Request) {
 		_, err = client.Bucket(bucket).Attrs(ctx)
 		if err == nil {
 			if *verbose {
-				log.Printf("received metadata for public bucket %s",
+				log.Printf("received metadata for bucket %s",
 					bucket,
 				)
 			}
