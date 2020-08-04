@@ -1,6 +1,12 @@
 repos:
+- repo: https://github.com/pre-commit/pre-commit-hooks
+  rev: v3.2.0
+  hooks:
+  - id: check-yaml
+  - id: end-of-file-fixer
+  - id: trailing-whitespace
 - repo: git://github.com/dnephin/pre-commit-golang
-  rev: master
+  rev: v0.3.5
   hooks:
   - id: go-fmt
   - id: go-vet
@@ -9,4 +15,3 @@ repos:
   - id: no-go-testing
   - id: go-unit-tests
   - id: go-build
-  - id: go-mod-tidy
