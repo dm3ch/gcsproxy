@@ -170,20 +170,37 @@ func livenessProbeHandler(w http.ResponseWriter, r *http.Request) {
 // response. The default list of buckets provided contains the three public Google buckets (see
 // https://cloud.google.com/storage/docs/public-datasets).
 func readinessProbeHandler(w http.ResponseWriter, r *http.Request) {
-	var err error
-	for _, bucket := range strings.Split(*readinessBuckets, ",") {
-		_, err = client.Bucket(bucket).Attrs(ctx)
-		if err == nil {
+
+	type bucketResponse struct {
+		bucketName string
+		err        error
+	}
+
+	var bucketList = strings.Split(*readinessBuckets, ",")
+	var ch = make(chan bucketResponse, len(bucketList))
+
+	for _, bucket := range bucketList {
+		go func(bucket string) {
+			var br bucketResponse
+			_, err := client.Bucket(bucket).Attrs(ctx)
+			br.bucketName, br.err = bucket, err
+			ch <- br
+		}(bucket)
+	}
+
+	for range bucketList {
+		br := <-ch
+		if br.err == nil {
 			if *verbose {
 				log.Printf("received metadata for bucket %s",
-					bucket,
+					br.bucketName,
 				)
 			}
 			return
 		}
 		log.Printf("error receiving metadata for bucket %s: %s",
-			bucket,
-			err,
+			br.bucketName,
+			br.err,
 		)
 	}
 	w.WriteHeader(http.StatusServiceUnavailable)
