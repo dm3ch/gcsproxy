@@ -1,3 +1,4 @@
-/vendor/
-/bin/
-/dist/
+/vendor
+/bin
+/dist
+gcsproxy
