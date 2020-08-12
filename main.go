@@ -3,11 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"html/template"
 	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -16,6 +16,7 @@ import (
 	"github.com/gorilla/mux"
 	"golang.org/x/oauth2/google"
 	"golang.org/x/oauth2/jwt"
+	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 	"gopkg.in/alecthomas/kingpin.v2"
 )
@@ -32,7 +33,30 @@ var (
 	client    *storage.Client
 	jwtConfig *jwt.Config
 	ctx       = context.Background()
+	dirTpl    = `
+<html><head><title>Index of {{ .Prefix }}</title></head>
+<body>
+<h1>Index of {{ .Prefix }}</h1><hr><pre>
+{{ if ne .Prefix "/"}}<a href="../">../</a>{{ end }}
+<table>
+{{- range .Items }}
+<tr><td><a href="{{ .RelativePath }}">{{ .RelativePath }}</a></td><td>{{ .ModifiedDate }}</td><td>{{ .SizeBytes }}</td></tr>
+{{- end -}}
+</table>
+</pre><hr>
+</body></html>`
 )
+
+type dirItem struct {
+	RelativePath string
+	ModifiedDate string
+	SizeBytes    string
+}
+
+type dirTplArgs struct {
+	Prefix string
+	Items  []dirItem
+}
 
 func handleError(w http.ResponseWriter, err error) {
 	if err != nil {
@@ -115,49 +139,122 @@ func generateV4GetObjectSignedURL(bucket, object string) (string, error) {
 		return "", fmt.Errorf("storage.SignedURL: %v", err)
 	}
 
-	fmt.Println("Generated GET signed URL:")
-	fmt.Printf("%q\n", u)
-	fmt.Println("You can use this URL with any user agent, for example:")
-	fmt.Printf("curl %q\n", u)
 	return u, nil
+}
+
+func getFile(w http.ResponseWriter, r *http.Request, bucket, object string) {
+	obj := client.Bucket(bucket).Object(object)
+	attr, err := obj.Attrs(ctx)
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+	objr, err := obj.NewReader(ctx)
+	defer objr.Close()
+
+	if err != nil {
+		handleError(w, err)
+		return
+	}
+
+	if *signedUrlGet {
+		u, err := generateV4GetObjectSignedURL(bucket, object)
+		if err != nil {
+			handleError(w, err)
+			return
+		}
+		http.Redirect(w, r, u, http.StatusTemporaryRedirect)
+	} else {
+		setStrHeader(w, "Content-Type", attr.ContentType)
+		setStrHeader(w, "Content-Language", attr.ContentLanguage)
+		setStrHeader(w, "Cache-Control", attr.CacheControl)
+		setStrHeader(w, "Content-Encoding", attr.ContentEncoding)
+		setStrHeader(w, "Content-Disposition", attr.ContentDisposition)
+		setIntHeader(w, "Content-Length", attr.Size)
+		io.Copy(w, objr)
+	}
+}
+
+func getDir(w http.ResponseWriter, r *http.Request, bucket, prefix string) {
+	bkt := client.Bucket(bucket)
+
+	if len(prefix) != 0 && prefix[len(prefix)-1:] != "/" {
+		http.Redirect(w, r, r.RequestURI+"/", http.StatusTemporaryRedirect)
+	}
+
+	query := &storage.Query{Prefix: prefix}
+	var items []dirItem
+	lastName := ""
+	it := bkt.Objects(ctx, query)
+	for {
+		attrs, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		name := strings.TrimPrefix(attrs.Name, prefix)
+		// Skips directory itself
+		if len(name) == 0 {
+			continue
+		}
+
+		//Get only items in this dir, not in sub dir
+		nameParts := strings.Split(name, "/")
+		name = nameParts[0]
+		if name == lastName {
+			continue
+		} else {
+			lastName = name
+		}
+
+		var item dirItem
+		item.RelativePath = name
+		item.ModifiedDate = attrs.Created.Format("02-Jan-2006 15:04 UTC")
+		if len(nameParts) > 1 {
+			item.SizeBytes = "-"
+		} else {
+			item.SizeBytes = strconv.FormatInt(attrs.Size, 10)
+		}
+
+		items = append(items, item)
+	}
+
+	if prefix == "" {
+		prefix = "/"
+	}
+
+	tmpl := template.Must(template.New("dir").Parse(dirTpl))
+	tmpl.Execute(w, dirTplArgs{
+		Prefix: prefix,
+		Items:  items,
+	})
+
+	return
+}
+
+func isDirectory(bucket, prefix string) bool {
+	if len(prefix) != 0 && prefix[len(prefix)-1:] != "/" {
+		prefix += "/"
+	}
+	bkt := client.Bucket(bucket)
+	query := &storage.Query{Prefix: prefix}
+	item, _ := bkt.Objects(ctx, query).Next()
+	return item != nil
 }
 
 func proxy(w http.ResponseWriter, r *http.Request) {
 	params := mux.Vars(r)
-	obj := client.Bucket(params["bucket"]).Object(params["object"])
+	bkt := client.Bucket(params["bucket"])
+	obj := bkt.Object(params["object"])
 	switch r.Method {
 	case http.MethodGet, http.MethodHead:
-		attr, err := obj.Attrs(ctx)
-		if err != nil {
-			handleError(w, err)
-			return
-		}
-		objr, err := obj.NewReader(ctx)
-		if err != nil {
-			handleError(w, err)
-			return
-		}
-		_, err = url.Parse(r.RequestURI)
-		if err != nil {
-			handleError(w, err)
-			return
-		}
-
-		if *signedUrlGet {
-			u, err := generateV4GetObjectSignedURL(params["bucket"], params["object"])
-			if err != nil {
-				handleError(w, err)
-				return
-			}
-			http.Redirect(w, r, u, 307)
+		if isDirectory(params["bucket"], params["object"]) {
+			getDir(w, r, params["bucket"], params["object"])
 		} else {
-			setStrHeader(w, "Content-Type", attr.ContentType)
-			setStrHeader(w, "Content-Language", attr.ContentLanguage)
-			setStrHeader(w, "Cache-Control", attr.CacheControl)
-			setStrHeader(w, "Content-Encoding", attr.ContentEncoding)
-			setStrHeader(w, "Content-Disposition", attr.ContentDisposition)
-			setIntHeader(w, "Content-Length", attr.Size)
-			io.Copy(w, objr)
+			getFile(w, r, params["bucket"], params["object"])
 		}
 
 	case http.MethodPost, http.MethodPut:
