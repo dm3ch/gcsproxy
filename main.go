@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"html/template"
 	"io"
 	"io/ioutil"
 	"log"
@@ -16,6 +17,7 @@ import (
 	"github.com/gorilla/mux"
 	"golang.org/x/oauth2/google"
 	"golang.org/x/oauth2/jwt"
+	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 	"gopkg.in/alecthomas/kingpin.v2"
 )
@@ -32,7 +34,29 @@ var (
 	client    *storage.Client
 	jwtConfig *jwt.Config
 	ctx       = context.Background()
+	dirTpl    = `
+<html><head><title>Index of {{ .Prefix }}</title></head>
+<body>
+<h1>Index of {{ .Prefix }}</h1><hr><pre><a href="../">../</a>
+<table>
+{{- range .Items }}
+<tr><td><a href="{{ $.Prefix }}{{ .RelativePath }}">{{ .RelativePath }}</a></td><td>{{ .ModifiedDate }}</td><td>{{ .SizeBytes }}</td></tr>
+{{- end -}}
+</table>
+</pre><hr>
+</body></html>`
 )
+
+type dirItem struct {
+	RelativePath string
+	ModifiedDate string
+	SizeBytes    string
+}
+
+type dirTplArgs struct {
+	Prefix string
+	Items  []dirItem
+}
 
 func handleError(w http.ResponseWriter, err error) {
 	if err != nil {
@@ -115,24 +139,73 @@ func generateV4GetObjectSignedURL(bucket, object string) (string, error) {
 		return "", fmt.Errorf("storage.SignedURL: %v", err)
 	}
 
-	fmt.Println("Generated GET signed URL:")
-	fmt.Printf("%q\n", u)
-	fmt.Println("You can use this URL with any user agent, for example:")
-	fmt.Printf("curl %q\n", u)
 	return u, nil
 }
 
 func proxy(w http.ResponseWriter, r *http.Request) {
 	params := mux.Vars(r)
-	obj := client.Bucket(params["bucket"]).Object(params["object"])
+	bkt := client.Bucket(params["bucket"])
+	obj := bkt.Object(params["object"])
 	switch r.Method {
 	case http.MethodGet, http.MethodHead:
 		attr, err := obj.Attrs(ctx)
 		if err != nil {
+			// If file not exists check if it's directory
+			prefix := params["object"]
+			if len(prefix) == 0 || prefix[len(prefix)-1:] != "/" {
+				prefix += "/"
+			}
+			query := &storage.Query{Prefix: prefix}
+
+			var items []dirItem
+			it := bkt.Objects(ctx, query)
+			for {
+				attrs, err := it.Next()
+				if err == iterator.Done {
+					break
+				}
+				if err != nil {
+					log.Fatal(err)
+				}
+				name := strings.TrimPrefix(attrs.Name, prefix)
+
+				//Filtering items that are located in subdirectories
+				path := name
+				if path[len(path)-1:] == "/" {
+					path = path[:len(path)-1]
+				}
+				//Skips item if it's located in sub directory
+				if strings.Contains(path, "/") {
+					continue
+				}
+				//Ends filtering items that are located in subdirectories
+
+				var item dirItem
+				item.RelativePath = name
+				item.ModifiedDate = attrs.Created.Format("02-Jan-2006 15:04 UTC")
+				if name[len(name)-1:] == "/" {
+					item.SizeBytes = "-"
+				} else {
+					item.SizeBytes = strconv.FormatInt(attrs.Size, 10)
+				}
+				items = append(items, item)
+			}
+			if len(items) != 0 {
+				tmpl := template.Must(template.New("dir").Parse(dirTpl))
+				tmpl.Execute(w, dirTplArgs{
+					Prefix: prefix,
+					Items:  items,
+				})
+				return
+			}
+			// End directory
+
 			handleError(w, err)
 			return
 		}
 		objr, err := obj.NewReader(ctx)
+		defer objr.Close()
+
 		if err != nil {
 			handleError(w, err)
 			return
