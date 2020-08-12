@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"encoding/json"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
@@ -14,6 +14,8 @@ import (
 
 	"cloud.google.com/go/storage"
 	"github.com/gorilla/mux"
+	"golang.org/x/oauth2/google"
+	"golang.org/x/oauth2/jwt"
 	"google.golang.org/api/option"
 	"gopkg.in/alecthomas/kingpin.v2"
 )
@@ -23,11 +25,13 @@ var (
 	verbose          = kingpin.Flag("verbose", "Show access log").Short('v').Envar("GCSPROXY_VERBOSE").Default("true").Bool()
 	credentials      = kingpin.Flag("credentials", "The path to the keyfile. If not present, client will use your default application credentials.").Short('c').Envar("GCSPROXY_CREDENTIALS").String()
 	readinessBuckets = kingpin.Flag("readiness-buckets", "Comma-separated list of bucket names to ping for readiness checks").Short('r').Envar("GCSPROXY_READINESS_BUCKETS").Default("gcp-public-data-landsat,gcp-public-data-nexrad-l2,gcp-public-data-sentinel-2").String()
+	signedUrlGet     = kingpin.Flag("get-signed-url", "Returns pre-signed url on get requests instead of actual data").Envar("GCSPROXY_GET_SIGNED_URL").Default("false").Bool()
 )
 
 var (
-	client *storage.Client
-	ctx    = context.Background()
+	client    *storage.Client
+	jwtConfig *jwt.Config
+	ctx       = context.Background()
 )
 
 func handleError(w http.ResponseWriter, err error) {
@@ -97,6 +101,27 @@ func wrapper(fn func(w http.ResponseWriter, r *http.Request)) http.HandlerFunc {
 	}
 }
 
+// generateV4GetObjectSignedURL generates object signed URL with GET method.
+func generateV4GetObjectSignedURL(bucket, object string) (string, error) {
+	opts := &storage.SignedURLOptions{
+		Scheme:         storage.SigningSchemeV4,
+		Method:         "GET",
+		GoogleAccessID: jwtConfig.Email,
+		PrivateKey:     jwtConfig.PrivateKey,
+		Expires:        time.Now().Add(1 * time.Hour),
+	}
+	u, err := storage.SignedURL(bucket, object, opts)
+	if err != nil {
+		return "", fmt.Errorf("storage.SignedURL: %v", err)
+	}
+
+	fmt.Println("Generated GET signed URL:")
+	fmt.Printf("%q\n", u)
+	fmt.Println("You can use this URL with any user agent, for example:")
+	fmt.Printf("curl %q\n", u)
+	return u, nil
+}
+
 func proxy(w http.ResponseWriter, r *http.Request) {
 	params := mux.Vars(r)
 	obj := client.Bucket(params["bucket"]).Object(params["object"])
@@ -112,19 +137,19 @@ func proxy(w http.ResponseWriter, r *http.Request) {
 			handleError(w, err)
 			return
 		}
-		u, err := url.Parse(r.RequestURI)
+		_, err = url.Parse(r.RequestURI)
 		if err != nil {
 			handleError(w, err)
 			return
 		}
-		if u.Query().Get("alt") != "media" {
-			setStrHeader(w, "Content-Type", "application/json")
-			jsonMetadata, err := json.Marshal(attr)
+
+		if *signedUrlGet {
+			u, err := generateV4GetObjectSignedURL(params["bucket"], params["object"])
 			if err != nil {
 				handleError(w, err)
 				return
 			}
-			w.Write(jsonMetadata)
+			http.Redirect(w, r, u, 307)
 		} else {
 			setStrHeader(w, "Content-Type", attr.ContentType)
 			setStrHeader(w, "Content-Language", attr.ContentLanguage)
@@ -134,6 +159,7 @@ func proxy(w http.ResponseWriter, r *http.Request) {
 			setIntHeader(w, "Content-Length", attr.Size)
 			io.Copy(w, objr)
 		}
+
 	case http.MethodPost, http.MethodPut:
 		wc := obj.NewWriter(ctx)
 		fileData, err := ioutil.ReadAll(r.Body)
@@ -210,11 +236,24 @@ func initClient() {
 	var err error
 	if *credentials != "" {
 		client, err = storage.NewClient(ctx, option.WithCredentialsFile(*credentials))
+		log.Printf("Starting gcsproxy with credentials")
 	} else {
 		client, err = storage.NewClient(ctx)
+		log.Printf("Starting gcsproxy without credentials")
 	}
 	if err != nil {
 		log.Fatalf("Failed to create client: %v", err)
+	}
+
+	if *signedUrlGet {
+		jsonKey, err := ioutil.ReadFile(*credentials)
+		if err != nil {
+			log.Fatalf("ioutil.ReadFile: %v", err)
+		}
+		jwtConfig, err = google.JWTConfigFromJSON(jsonKey)
+		if err != nil {
+			log.Fatalf("google.JWTConfigFromJSON: %v", err)
+		}
 	}
 }
 
